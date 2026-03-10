@@ -24,8 +24,8 @@ go mod download
 # Run the application
 go run .
 ```
-```bash
-// build executable
+```bas
+# build executable
 go build .
 ```
 
