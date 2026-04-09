@@ -388,7 +388,7 @@ func (m Model) viewDateOverview() string {
 	user := m.users[m.cursor]
 	var b strings.Builder
 	if len(user.HostedDailies) <= 0 {
-		b.WriteString(fmt.Sprintf("%s has not hosted any dailies yet", user.Name))
+		_, _ = fmt.Fprintf(&b, "%s has not hosted any dailies yet", user.Name)
 	} else {
 		b.WriteString(titleStyle.Render(fmt.Sprintf("%s hosted dailies the following days", user.Name)))
 		b.WriteString("\n\n")
