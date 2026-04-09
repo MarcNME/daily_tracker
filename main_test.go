@@ -65,7 +65,7 @@ func TestModel_View(t *testing.T) {
 				currentScreen: screenOverview,
 				err:           nil,
 			},
-			expected: "No users yet. Press 'a' to add one.\n\nKeys: ↑/↓ move | a add | Enter Add Date | q quit\n",
+			expected: "No users yet. Press 'a' to add one.\n\nKeys: ↑/↓ move | a add | e rename user | v view dates | Enter add date | Del delete user | q quit\n",
 		},
 		{
 			name: "view overview with users",
@@ -77,7 +77,7 @@ func TestModel_View(t *testing.T) {
 				err:           nil,
 			},
 			tableToStringReturn: "Some user data",
-			expected:            "Some user data\nKeys: ↑/↓ move | a add | Enter Add Date | q quit\n",
+			expected:            "Some user data\nKeys: ↑/↓ move | a add | e rename user | v view dates | Enter add date | Del delete user | q quit\n",
 		},
 		{
 			name: "view overview error",
@@ -89,7 +89,7 @@ func TestModel_View(t *testing.T) {
 				err:           fmt.Errorf("something went wrong"),
 			},
 			tableToStringReturn: "Some user data",
-			expected:            "⚠ something went wrong\n\nSome user data\nKeys: ↑/↓ move | a add | Enter Add Date | q quit\n",
+			expected:            "⚠ something went wrong\n\nSome user data\nKeys: ↑/↓ move | a add | e rename user | v view dates | Enter add date | Del delete user | q quit\n",
 		},
 		{
 			name: "view add user",
