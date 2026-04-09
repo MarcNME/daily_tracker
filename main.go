@@ -27,8 +27,10 @@ type Model struct {
 	input      textinput.Model
 	datepicker datepicker.Model
 
-	currentScreen screen
-	err           error
+	currentScreen      screen
+	err                error
+	confirmationMsg    string
+	confirmationReason confirmationReason
 }
 
 type Users []User
@@ -38,13 +40,21 @@ type User struct {
 	HostedDailies []time.Time `json:"hosted_dailies"`
 }
 
-type screen int
+type screen uint8
 
 const (
 	screenOverview screen = iota
 	screenAddUser
 	screenUserRename
 	screenAddDate
+	screenConfirmation
+	screenDateOverview
+)
+
+type confirmationReason uint8
+
+const (
+	reasonUserDeletion confirmationReason = iota
 )
 
 var (
@@ -59,8 +69,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateOverview(msg)
 	case screenAddUser:
 		return m.updateUserAdd(msg)
+	case screenUserRename:
+		return m.updateUserRename(msg)
 	case screenAddDate:
 		return m.updateDateAdd(msg)
+	case screenConfirmation:
+		return m.updateConfirmation(msg)
+	case screenDateOverview:
+		return m.updateDateOverview(msg)
 	default:
 		return m, nil
 	}
@@ -73,9 +89,13 @@ func (m Model) View() string {
 	case screenAddUser:
 		return m.viewUserAdd()
 	case screenUserRename:
-		return "User Rename Screen"
+		return m.viewUserRename()
 	case screenAddDate:
 		return m.viewDateAdd()
+	case screenConfirmation:
+		return m.viewConfirmation()
+	case screenDateOverview:
+		return m.viewDateOverview()
 	default:
 		return "Unknown Screen"
 	}
@@ -88,9 +108,7 @@ func (m Model) updateOverview(msg tea.Msg) (Model, tea.Cmd) {
 
 	// Is it a key press?
 	case tea.KeyMsg:
-		// Cool, what was the actual key pressed?
 		switch msg.String() {
-
 		// These keys should exit the program.
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -112,15 +130,27 @@ func (m Model) updateOverview(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case "a":
+			m.err = nil
 			m.currentScreen = screenAddUser
 			m.input.SetValue("")
 			m.input.Focus()
-			return m, nil
 		case "enter":
+			m.err = nil
 			m.currentScreen = screenAddDate
 			m.datepicker = datepicker.New(time.Now())
 			m.datepicker.SelectDate()
-			return m, nil
+		case "e":
+			m.err = nil
+			m.currentScreen = screenUserRename
+			m.input.SetValue(m.users[m.cursor].Name)
+			m.input.Focus()
+		case "delete":
+			m.err = nil
+			m.currentScreen = screenConfirmation
+			m.confirmationMsg = fmt.Sprintf("Are you sure you want to remove %s permanently?", m.users[m.cursor].Name)
+			m.confirmationReason = reasonUserDeletion
+		case "v":
+			m.currentScreen = screenDateOverview
 		}
 	}
 
@@ -155,7 +185,7 @@ func (m Model) viewOverview() string {
 	}
 
 	// The footer
-	sb.WriteString("\nKeys: ↑/↓ move | a add | Enter Add Date | q quit\n")
+	sb.WriteString("\nKeys: ↑/↓ move | a add | e rename user | v view dates | Enter add date | Del delete user | q quit\n")
 
 	// Send the UI for rendering
 	return sb.String()
@@ -197,8 +227,11 @@ func (m Model) updateUserAdd(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) viewUserAdd() string {
 	var b strings.Builder
-	title := "Add user"
-	b.WriteString(titleStyle.Render(title))
+	b.WriteString(titleStyle.Render("Add user"))
+	if m.err != nil {
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render(m.err.Error()))
+	}
 	b.WriteString("\n\n")
 	b.WriteString("Name:\n")
 	b.WriteString(m.input.View())
@@ -206,6 +239,53 @@ func (m Model) viewUserAdd() string {
 	b.WriteString(helpStyle.Render("Enter save | Esc cancel"))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// rename user screen
+
+func (m Model) viewUserRename() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Rename user"))
+	if m.err != nil {
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render(m.err.Error()))
+	}
+	b.WriteString("\n\n")
+	b.WriteString("Name:\n")
+	b.WriteString(m.input.View())
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("Enter save | Esc cancel"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m Model) updateUserRename(msg tea.Msg) (Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.currentScreen = screenOverview
+			m.input.Blur()
+			return m, tea.ClearScreen
+		case "enter":
+			name := strings.TrimSpace(m.input.Value())
+			if name == "" {
+				m.err = errors.New("name cannot be empty")
+				return m, nil
+			}
+			m.users[m.cursor].Name = name
+
+			m.err = m.writeChangesToFS()
+			m.currentScreen = screenOverview
+			m.input.Blur()
+			m.updateTable()
+			return m, tea.ClearScreen
+		}
+	}
+	return m, cmd
 }
 
 // add date screen
@@ -252,6 +332,74 @@ func (m Model) viewDateAdd() string {
 	sb.WriteString("Enter save | Esc/q cancel")
 
 	return sb.String()
+}
+
+// confirmation screen
+
+func (m Model) updateConfirmation(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q", "enter", "n":
+			m.currentScreen = screenOverview
+			return m, nil
+
+		case "y":
+			if m.confirmationReason == reasonUserDeletion {
+				m.users = append(m.users[:m.cursor], m.users[m.cursor+1:]...)
+			}
+
+			m.err = m.writeChangesToFS()
+			m.currentScreen = screenOverview
+			m.table = m.updateTable()
+			m.cursor = 0
+			return m, tea.ClearScreen
+		}
+	}
+
+	return m, nil
+}
+
+func (m Model) viewConfirmation() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Delete User?"))
+	b.WriteString("\n\n")
+	b.WriteString(m.confirmationMsg)
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("y/N Yes/No"))
+	return b.String()
+}
+
+// date overview
+
+func (m Model) updateDateOverview(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q":
+			m.currentScreen = screenOverview
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) viewDateOverview() string {
+	user := m.users[m.cursor]
+	var b strings.Builder
+	if len(user.HostedDailies) <= 0 {
+		b.WriteString(fmt.Sprintf("%s has not hosted any dailies yet", user.Name))
+	} else {
+		b.WriteString(titleStyle.Render(fmt.Sprintf("%s hosted dailies the following days", user.Name)))
+		b.WriteString("\n\n")
+		for _, dailyDate := range user.HostedDailies {
+			b.WriteString(dailyDate.Format("Mon 02 January 2006"))
+			b.WriteRune('\n')
+		}
+	}
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("q/Esc return to overview"))
+	return b.String()
 }
 
 func (m Model) Init() tea.Cmd {
